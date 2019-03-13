@@ -33,16 +33,13 @@ SECTION     .data                   ; Section containing initialized data
     
     EXIT_OK     EQU 0               ; Process exit code for successful termination
     EXIT_ERR    EQU -1              ; Process exit code for a general error condition
+    
+    EOF         EQU 0               ; End-of-file result from sys_read
 
 ; Message to welcome the user to the program
     WELCOMEMSG db "validatenumericinput v1.0 by Brian Hart",10,0
                db 10,0
-               db "This program tests the ValidateNumericInput procedure.  This procedure",10,0
-               db "takes a text string as input and attempts to validate whether it can be",10,0
-               db "successfully parsed as being the string representation of an integer.",10,0
-               db "As we all know from math class, an integer is defined as a positive or",10,0
-               db "negative whole number or zero.  If invalid input is typed, the program will",10,0
-               db "die.  Otherwise, nothing else happens and control is returned to the main thread.",10,0
+               db "Type an integer at the prompt.  We'll tell you if it's valid input or not.",10,0
                db 10,0
     WELCOMEMSGLEN EQU $-WELCOMEMSG
     
@@ -57,6 +54,9 @@ SECTION     .data                   ; Section containing initialized data
     
     DONEMSG: db "Program executed successfully.",10,0
     DONEMSGLEN EQU $-DONEMSG            
+    
+    VALOK: db "Validation successful.",10,0
+    VALOKLEN EQU $-VALOK
     
     LF: db 10,0
     LFLEN EQU $-LF
@@ -119,6 +119,54 @@ GetText:
     pop ebx                         ; Restore caller's EBX
     ret                             ; Return to caller
     
+;------------------------------------------------------------------------------
+; ValidateNumericInput: Validates that user input is indeed a number.
+; UPDATED:              03/13/2019
+; IN:                   ESI = Count of characters of user input
+;                       EDI = Address of user input buffer
+; RETURNS:              Nothing
+; MODIFIED:             Nothing
+; CALLS:                Nothing
+; DESCRIPTION:          Validates the contents of the user input buffer to ensure
+;                       that the contents of said buffer are parsable as a positive
+;                       or negative integer.  If not, then jumps to this program's
+;                       ERROR label; if so, then the function simply returns control
+;                       to the caller.
+ValidateNumericInput:
+    pushad                          ; Save all 32-bit GP registers
+    xor eax, eax                    ; Clear EAX to be zero
+    xor ebx, ebx                    ; Clear EBX to be zero
+    xor ecx, ecx                    ; Clear ECX to be zero
+    xor edx, edx                    ; Clear EDX to be zero
+    .Scan:
+        cmp byte [edi+ecx], 0       ; Test input char for null-terminator
+        je .Next                    ; Skip to next char if so
+        cmp byte [edi+ecx], 0Ah     ; Test input char for null-terminator
+        je .Next                    ; Skip to next char if so
+        cmp byte [edi+ecx], 20h     ; Test input char for a nonprinting char
+        jna Error                   ; All nonprinting chars are invalid
+        cmp byte [edi+ecx], 2Dh     ; Test input char for hyphen (might be a minus sign)
+        je .mightBeMinus            ; If currentChar == '-' then test whether it's the first char
+        cmp byte [edi+ecx], 2Ch     ; Test input char for a thousands separator (comma)
+        je .Next                    ; Ignore commas
+        cmp byte [edi+ecx], 2Eh     ; Test input char for a decimal point
+        je Error                    ; Invalid value; floating-point numbers not supported
+        cmp byte [edi+ecx], 30h     ; Test input char against '0'
+        jb Error                    ; If below '0' in ASCII chart, not a digit
+        cmp byte [edi+ecx], 39h     ; Test input char against '9'
+        ja Error                    ; If above '9' in ASCII chart, not a digit
+        jmp .Next                   ; Skip to Next iteration now, because we are good to go
+        .mightBeMinus:
+            cmp ecx, 0              ; Check whether ECX==0, i.e., we are on the first iteration
+            jne Error               ; If ECX != 0 and we are here, a hyphen occurred in the middle of the input
+        .Next:
+            inc ecx                 ; Like i++; increment our loop counter
+            cmp ecx, esi            ; Is ecx==esi?
+            jne .Scan               ; If ecx!=esi, then loop to next iteration  
+    .Done:        
+        popad                       ; Restore all 32-bit GP registers
+    ret 
+    
 GLOBAL _start                       ; Tell the linker where the program's entry point is
 
 _start:                             ; This label is the program's entry point
@@ -135,21 +183,40 @@ _start:                             ; This label is the program's entry point
     mov ecx, INPUT                  ; Input buffer for the user's input
     mov edx, INPUTLEN               ; Length of the input buffer
     call GetText                    ; Gets the input from the user
-
-    mov ecx, LF                     ; A linefeed character
-    mov edx, LFLEN                  ; Length of the message to display
-    call DisplayText                ; Display the newline to the user
-
-    ; TODO: Add new program code here
-    nop                             ; Keeps gdb happy
     
-    mov ecx, LF                     ; A linefeed character
-    mov edx, LFLEN                  ; Length of the message to display
-    call DisplayText                ; Display the newline to the user
+; Once GetText has been called, EAX now contains the number of chars inputted
+; Check for EOF (zero chars inputted), and, in this case, jump to the Done label
+    cmp eax, EOF                    ; Check whether EAX == EOF
+    je Done                         ; If EAX == EOF, then jump to Done label
     
-    mov ecx, DONEMSG                ; Address of the "program finished successfully" message
-    mov edx, DONEMSGLEN             ; Length of the message to display to the user
+; If we are here, copy the value in EAX to ESI and the address of the INPUT
+; into EDI, since then we can call ValidateNumericInput.  If we are still
+; in this thread when ValidateNumericInput returns control to us, then we should
+; announce to the user that validation passed    
+
+    mov esi, eax                    ; Copy EAX value to ESI
+    mov edi, INPUT                  ; Copy address of INPUT buffer to EDI
+    call ValidateNumericInput       ; Validate the numeric input.
+    
+    mov ecx, VALOK                  ; Address of the VALOK message announcing that validation passed
+    mov edx, VALOKLEN               ; Length of the validation succeeded message
     call DisplayText                ; Display the message to the user.
+    
+Done:    
+;    mov ecx, DONEMSG                ; Address of the "program finished successfully" message
+;    mov edx, DONEMSGLEN             ; Length of the message to display to the user
+;    call DisplayText                ; Display the message to the user.
     
     mov ebx, EXIT_OK                ; Specify EXIT_OK code for successful completion
     call ExitProgram                ; Exit the software gracefully
+    
+; Handle the case where this program has to die because an error occurred    
+Error:    
+    mov ecx, INVALIDVAL             ; Invalid value typed messgae address
+    mov edx, INVALIDVALLEN          ; Length of the invalid value typed message
+    call DisplayText                ; Display the message to the user
+    
+    mov ebx, EXIT_ERR               ; Specify EXIT_ERR code for error
+    call ExitProgram                ; Exit the software gracefully
+
+    nop                             ; Keeps gdb happy
