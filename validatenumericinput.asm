@@ -44,9 +44,49 @@ SECTION     .data                   ; Section containing initialized data
     
 SECTION .text                       ; Section containing the program's code
 
-GLOBAL _start
+;------------------------------------------------------------------------------
+; DisplayText:          Displays a text string on the STDOUT
+; UPDATED:              03/12/2019
+; IN:                   ECX = Address of the start of the output buffer
+;                       EDX = Count of characters to be displayed
+; RETURNS:              Nothing
+; MODIFIED:             Nothing
+; CALLS:                sys_write via INT 80h
+; DESCRIPTION:          Writes whatever text is referenced by ECX and EDX to the
+;                       STDOUT.  By default, writing to STDOUT causes text to be
+;                       displayed on the user's console.
+;
+DisplayText:
+    push eax                        ; Save caller's EAX
+    push ebx                        ; Save caller's EBX
+    mov eax, SYS_WRITE              ; Specify sys_write syscall
+    mov ebX, STDOUT                 ; Specify File Descriptor 1: Standard Output
+    int 80h                         ; Make kernel call; assume ECX and EDX already initialized
+    pop ebx                         ; Restore caller's EBX
+    pop eax                         ; Restore caller's EAX
+    ret                             ; Return to caller
+    
+;------------------------------------------------------------------------------
+; GetText:              Reads in text from user input
+; UPDATED:              03/12/2019
+; IN:                   ECX = Address of the start of the output buffer
+;                       EDX = Count of characters to be displayed
+; RETURNS:              Nothing
+; MODIFIED:             EAX contains number of bytes read (including carriage return)
+; CALLS:                sys_write via INT 80h
+; DESCRIPTION:          Reads user input from screen into a buffer
+;
+GetText:
+    push ebx                        ; Save caller's EBX
+    mov eax, SYS_READ               ; Specify sys_read syscall
+    mov ebX, STDIN                  ; Specify File Descriptor 0: Standard Input
+    int 80h                         ; Make kernel call; assume ECX and EDX already initialized
+    pop ebx                         ; Restore caller's EBX
+    ret                             ; Return to caller
 
-_start:
+GLOBAL _start                       ; Tell the linker where the program's entry point is
+
+_start:                             ; This label is the program's entry point
     nop                             ; Keeps gdb happy
     
     ; TODO: Add new program code here
